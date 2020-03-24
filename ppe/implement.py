@@ -28,7 +28,7 @@ class EventType(enum.Enum):
     P_ASSIGN = "PatientAssignment"
     P_DECLINED = "PatientDeclined"
     P_REASSIGN = "PatientReassignment"
-    P_EARLY_EXIT = "PatientEarlyExit"
+    P_LIVE = "PatientLive"
     P_DISCHARGE = "PatientDischarge"
     P_DEATH = "PatientDeath"
     P_BED = "PatientGivenBed"
@@ -83,15 +83,15 @@ class CSVLogger(framework.HospitalLogger):
                                  patient: framework.PatientInfo):
         self.log_event(time=time, event_type=EventType.P_REASSIGN, patient=patient, staff=new_staff)
 
-    def log_patient_exit(self, exit_time: int, patient: framework.PatientInfo, outcome: framework.Outcome):
+    def log_patient_outcome(self, time: int, patient: framework.PatientInfo, outcome: framework.Outcome):
         if outcome == framework.Outcome.DIES:
             event = EventType.P_DEATH
         elif outcome == framework.Outcome.LIVES:
-            event = EventType.P_DISCHARGE
+            event = EventType.P_LIVE
         else:
             event = EventType.INVALID
             warnings.warn("Invalid event occurred: patient neither died nor lived")
-        self.log_event(time=exit_time, event_type=event, patient=patient, staff=None)
+        self.log_event(time=time, event_type=event, patient=patient, staff=None)
 
     def log_shift_end(self, end_time: int, staff: framework.StaffInfo):
         self.log_event(time=end_time, event_type=EventType.S_END, patient=None, staff=staff)
@@ -99,8 +99,8 @@ class CSVLogger(framework.HospitalLogger):
     def log_start_shift(self, time: int, staff: framework.StaffInfo, options: framework.StaffOptions):
         self.log_event(time=time, event_type=EventType.S_START, patient=None, staff=staff)
 
-    def log_early_discharge(self, time: int, patient: framework.PatientInfo):
-        self.log_event(time=time, event_type=EventType.P_EARLY_EXIT, patient=patient, staff=None)
+    def log_patient_discharge(self, time: int, patient: framework.PatientInfo):
+        self.log_event(time=time, event_type=EventType.P_DISCHARGE, patient=patient, staff=None)
 
     def log_patient_given_bed(self, time: int, patient: framework.PatientInfo):
         self.log_event(time=time, event_type=EventType.P_BED, patient=patient, staff=None)
@@ -353,14 +353,17 @@ class HospitalModelImpl(framework.HospitalModel):
     next_id: int
     last_arrival_time: float
     _random_generator: numpy.random.RandomState
-    _surivivalprobs: typing.Dict[framework.InfectionSeverity, float]
+    _icu_surivivalprobs: typing.Dict[framework.InfectionSeverity, float]
+    _noicu_surivivalprobs: typing.Dict[framework.InfectionSeverity, float]
+
     _ordered_severity: typing.Tuple[
         framework.InfectionSeverity, ...]  # NOTE: severity order is arbitrary, not increasing
     _severity_pdf: typing.Tuple[float, ...]  # Same length as _ordered_severity
     _stay_dists: typing.Dict
     _interarrival_function: typing.Callable[[int], float]
 
-    def __init__(self, survivalprobs: typing.Dict[framework.InfectionSeverity, float],
+    def __init__(self, icu_survivalprobs: typing.Dict[framework.InfectionSeverity, float],
+                 noicu_survivalprobs: typing.Dict[framework.InfectionSeverity, float],
                  severity_dist: typing.Dict[framework.InfectionSeverity, float],
                  stay_dists: typing.Dict,
                  interarrival_function: typing.Callable[[int], float],
@@ -368,7 +371,7 @@ class HospitalModelImpl(framework.HospitalModel):
                  start_time: int = 0):
         """
 
-        :param survivalprobs: dictionary maps severity to probability of surviving
+        :param icu_survivalprobs: dictionary maps severity to probability of surviving
         :param severity_dist: dictionary maps severity to probability that ICU patient has that severity
         :param stay_dists: dictionary maps severity to distribution of stay for that patient
         :param seed:
@@ -378,16 +381,26 @@ class HospitalModelImpl(framework.HospitalModel):
         self.next_id = lowest_id
         self.last_arrival_time = start_time
         self._random_generator = numpy.random.RandomState(seed=seed)
-        self._surivivalprobs = survivalprobs
+        self._icu_surivivalprobs = icu_survivalprobs
+        self._noicu_surivivalprobs= noicu_survivalprobs
         self._ordered_severity = tuple(severity_dist.keys())
         self._severity_pdf = tuple(severity_dist[k] for k in self._ordered_severity)
         self._stay_dists = stay_dists
 
         self._interarrival_function = interarrival_function
 
-    def generate_outcome(self, patient: framework.PatientInfo,
-                         status: framework.PatientStatus) -> framework.Outcome:
-        survivalprob = self._surivivalprobs[status.covid_severity]
+    def generate_icu_outcome(self, patient: framework.PatientInfo,
+                             status: framework.PatientStatus) -> framework.Outcome:
+        survivalprob = self._icu_surivivalprobs[status.covid_severity]
+        random_num = self._random_generator.random(size=1)[0]
+        if random_num >= survivalprob:
+            return framework.Outcome.DIES
+        else:
+            return framework.Outcome.LIVES
+
+    def generate_noicu_outcome(self, patient: framework.PatientInfo,
+                             status: framework.PatientStatus) -> framework.Outcome:
+        survivalprob = self._noicu_surivivalprobs[status.covid_severity]
         random_num = self._random_generator.random(size=1)[0]
         if random_num >= survivalprob:
             return framework.Outcome.DIES

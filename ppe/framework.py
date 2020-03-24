@@ -2,21 +2,25 @@ import typing
 import enum
 import simpy
 
+
 @enum.unique
 class Outcome(enum.Enum):
     DIES = enum.auto()
     LIVES = enum.auto()
+
 
 @enum.unique
 class PPE(enum.Enum):
     NO_PPE = enum.auto()
     FULL_PPE = enum.auto()
 
+
 @enum.unique
 class InfectionStatus(enum.Enum):
     SUSCEPTIBLE = enum.auto()
     INFECTED = enum.auto()
     RECOVERED = enum.auto()
+
 
 @enum.unique
 class TestStatus(enum.Enum):
@@ -132,7 +136,10 @@ class HospitalState:
 
 class HospitalModel:
 
-    def generate_outcome(self, patient: PatientInfo, status: PatientStatus) -> Outcome:
+    def generate_icu_outcome(self, patient: PatientInfo, status: PatientStatus) -> Outcome:
+        raise NotImplementedError
+
+    def generate_noicu_outcome(self, patient: PatientInfo, status: PatientStatus) -> Outcome:
         raise NotImplementedError
 
     def generate_next_arrival(self) -> PatientArrival:
@@ -199,7 +206,7 @@ class HospitalLogger:
     def log_patient_staff_assignment(self, time: int, patient: PatientInfo, staff: StaffInfo):
         pass
 
-    def log_patient_exit(self, exit_time: int, patient: PatientInfo, outcome: Outcome):
+    def log_patient_outcome(self, time: int, patient: PatientInfo, outcome: Outcome):
         pass
 
     def log_shift_end(self, end_time: int, staff: StaffInfo):
@@ -211,7 +218,7 @@ class HospitalLogger:
     def log_start_shift(self, time: int, staff: StaffInfo, options: StaffOptions):
         pass
 
-    def log_early_discharge(self, time: int, patient: PatientInfo):
+    def log_patient_discharge(self, time: int, patient: PatientInfo):
         pass
 
     def log_patient_declined(self, time: int, patient: PatientInfo):
@@ -238,7 +245,9 @@ def handle_patient_exit(env: simpy.Environment, exit_time: int, patient: Patient
     current_time = env.now
     yield env.timeout(exit_time - current_time)
     if not hospital.has_exited(patient):
-        logger.log_patient_exit(exit_time=exit_time, patient=patient, outcome=outcome)
+        if outcome == Outcome.LIVES:
+            logger.log_patient_discharge(time=exit_time, patient=patient)
+        logger.log_patient_outcome(time=exit_time, patient=patient, outcome=outcome)
         hospital.discharge_patient(patient)
 
 
@@ -261,9 +270,12 @@ def handle_patient_arrival(env: simpy.Environment, arrival: PatientArrival, hosp
     logger.log_patient_arrived(time=arrival.arrival_time, patient=arrival.patient, status=arrival.status)
     if arrival_assign is None:
         logger.log_patient_declined(time=arrival.arrival_time, patient=arrival.patient)
+        exit_outcome = model.generate_noicu_outcome(patient=arrival.patient, status=arrival.status)
+        logger.log_patient_outcome(time=arrival.arrival_time, patient=arrival.patient, outcome=exit_outcome)
+
     else:
         exit_time = arrival.arrival_time + model.generate_stay_length(patient=arrival.patient, status=arrival.status)
-        exit_outcome = model.generate_outcome(patient=arrival.patient, status=arrival.status)
+        exit_outcome = model.generate_icu_outcome(patient=arrival.patient, status=arrival.status)
         env.process(handle_patient_exit(env=env, exit_time=exit_time, outcome=exit_outcome, patient=arrival.patient,
                                         hospital=hospital, logger=logger))
         hospital.add_patient(patient=arrival.patient, status=arrival.status)
@@ -305,15 +317,15 @@ def apply_reassignment(time: int, orphaned_patients: typing.Set[PatientInfo],
                     hospital.assign(s, patient)
                     logger.log_patient_reassignment(time=time, old_staff=staff, new_staff=s, patient=patient)
         else:
-            hospital.discharge_early(patient=patient)
-            logger.log_early_discharge(time=time, patient=patient)
+            pass
+            #TODO implement this
     return
 
 
 def handle_eos(env: simpy.Environment, shift_end_time: int, staff: StaffInfo, hospital: T,
                logger: HospitalLogger, policy: HospitalPolicy[T],
                model: HospitalModel):
-    #TODO: This probably needs refactoring.
+    # TODO: This probably needs refactoring.
     current_time = env.now
     yield env.timeout(shift_end_time - current_time)
     logger.log_shift_end(end_time=shift_end_time, staff=staff)

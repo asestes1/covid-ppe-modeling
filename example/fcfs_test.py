@@ -7,29 +7,23 @@ import simpy
 
 project_dir = os.path.abspath(os.path.join(os.path.join(__file__, os.pardir), os.pardir))
 ppe_dir = os.path.abspath(os.path.join(project_dir, "ppe"))
+sys.path.insert(0, ppe_dir)
+
 resource_dir = os.path.abspath(os.path.join(project_dir, "resources"))
 results_dir = os.path.abspath(os.path.join(project_dir, "generated_results"))
 if not os.path.isdir(results_dir):
     os.mkdir(results_dir)
 
-sys.path.insert(0, ppe_dir)
 
 import ppe.framework
 import ppe.implement
 
 seed=0
 minutes_per_day = 60 * 24
-survival_probs = {ppe.framework.InfectionSeverity.MODERATE: 0.995,
-                  ppe.framework.InfectionSeverity.SEVERE: 0.99,
-                  ppe.framework.InfectionSeverity.REQ_VENT: 0.75}
-
-icu_dist = {ppe.framework.InfectionSeverity.MODERATE: 0.7,
-            ppe.framework.InfectionSeverity.SEVERE: 0.25,
-            ppe.framework.InfectionSeverity.REQ_VENT: 0.05}
-
-stay_dists = {ppe.framework.InfectionSeverity.MODERATE: scipy.stats.poisson(mu=5 * minutes_per_day),
-              ppe.framework.InfectionSeverity.SEVERE: scipy.stats.poisson(mu=10 * minutes_per_day),
-              ppe.framework.InfectionSeverity.REQ_VENT: scipy.stats.poisson(mu=15 * minutes_per_day)}
+icu_survival_probs = {ppe.framework.InfectionSeverity.REQ_VENT: 0.75}
+noicu_survival_probs = {ppe.framework.InfectionSeverity.REQ_VENT: 0.25}
+icu_dist = {ppe.framework.InfectionSeverity.REQ_VENT: 1}
+stay_dists = {ppe.framework.InfectionSeverity.REQ_VENT: scipy.stats.poisson(mu=10 * minutes_per_day)}
 
 icu_demand_filepath = os.path.abspath(os.path.join(resource_dir, "icu_demand.csv"))
 est_icu_demands = pandas.read_csv(icu_demand_filepath).values.ravel()
@@ -42,8 +36,9 @@ def interarrival_function(x: float) -> float:
 
 env = simpy.Environment()
 myhospital = ppe.implement.HospitalStateImpl(existing_patients={}, bedusers=set(), ventusers=set())
-mypolicy = ppe.implement.FirstComeFirstServedPolicy(max_beds=500, max_ventilators=450)
-model = ppe.implement.HospitalModelImpl(survivalprobs=survival_probs,
+mypolicy = ppe.implement.FirstComeFirstServedPolicy(max_beds=180, max_ventilators=150)
+model = ppe.implement.HospitalModelImpl(icu_survivalprobs=icu_survival_probs,
+                                        noicu_survivalprobs=noicu_survival_probs,
                                         severity_dist=icu_dist,
                                         stay_dists=stay_dists,
                                         interarrival_function=interarrival_function, seed=seed)
