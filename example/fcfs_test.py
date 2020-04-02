@@ -20,18 +20,19 @@ import ppe.implement
 
 seed=0
 minutes_per_day = 60 * 24
-icu_survival_probs = {ppe.framework.InfectionSeverity.REQ_VENT: 0.75}
-noicu_survival_probs = {ppe.framework.InfectionSeverity.REQ_VENT: 0.25}
+icu_survival_probs = {ppe.framework.InfectionSeverity.REQ_VENT: 0.5}
+noicu_survival_probs = {ppe.framework.InfectionSeverity.REQ_VENT: 0.05}
 icu_dist = {ppe.framework.InfectionSeverity.REQ_VENT: 1}
 stay_dists = {ppe.framework.InfectionSeverity.REQ_VENT: scipy.stats.poisson(mu=10 * minutes_per_day)}
 
-icu_demand_filepath = os.path.abspath(os.path.join(resource_dir, "icu_demand.csv"))
-est_icu_demands = pandas.read_csv(icu_demand_filepath).values.ravel()
+demand_filepath = os.path.abspath(os.path.join(resource_dir, "demands_3_24.csv"))
+demand_frame = pandas.read_csv(demand_filepath)
+est_icu_demands = demand_frame['T_600'].values.ravel() * (3 / 5.6) * (1 / 3)
 
 
 def interarrival_function(x: float) -> float:
     day_index = int(x / minutes_per_day)
-    return minutes_per_day / (est_icu_demands[day_index] / 3.0)
+    return minutes_per_day / est_icu_demands[day_index]
 
 
 env = simpy.Environment()

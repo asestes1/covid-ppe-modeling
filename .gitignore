@@ -1,5 +1,6 @@
 .idea/
 generated_results/
+generated_figs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
